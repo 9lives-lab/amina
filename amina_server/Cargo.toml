@@ -1,0 +1,16 @@
+[package]
+name = "amina_server"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+
+[dependencies]
+log = "0.4.14"
+tokio = { version = "1.30.0", features = ["full"] }
+warp = "0.3.5"
+bytes = "1.4.0"
+futures = "0.3.25"
+tokio-stream = "0.1.14"
+serde = "1.0.130"
+serde_json = "1.0.69"
+amina_core = { path = "../amina_core" }
