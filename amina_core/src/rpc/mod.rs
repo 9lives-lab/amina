@@ -64,6 +64,10 @@ struct Listener {
     handler: Box<dyn Fn(&str) -> String + Sync + Send + 'static>,
 }
 
+struct GetFileListener {
+    handler: Box<dyn Fn(&str) -> Result<Vec<u8>, std::io::Error> + Sync + Send + 'static>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct EmptyData {
     pub value: Option<i32>,
@@ -81,6 +85,7 @@ impl EmptyData {
 
 pub struct Rpc {
     calls: RwLock<HashMap<String, Listener>>,
+    get_file_calls: RwLock<HashMap<String, GetFileListener>>,
 }
 
 impl Rpc {
@@ -88,6 +93,7 @@ impl Rpc {
     pub fn new() -> Self {
         Self {
             calls: RwLock::new(HashMap::new()),
+            get_file_calls: RwLock::new(HashMap::new()),
         }
     }
 
@@ -194,6 +200,31 @@ impl Rpc {
         }
     }
 
+    pub fn add_get_file_handler<F>(&self, key: &str, handler: F) where
+            F: Fn(&str) -> Result<Vec<u8>, std::io::Error> + Send + Sync + 'static
+    {
+        let listener = GetFileListener {
+            handler: Box::new(handler),
+        };
+
+        self.add_raw_get_file_listener(key, listener);
+    }
+
+    fn add_raw_get_file_listener(&self, key: &str, listener: GetFileListener) {
+        let mut get_file_calls = self.get_file_calls.write().unwrap();
+        get_file_calls.insert(key.to_string(), listener);
+    }
+
+    fn get_file(&self, key: &str, path: &str) -> Result<Vec<u8>, std::io::Error> {
+        let file_calls = self.get_file_calls.read().unwrap();
+        return if let Some(listener) = file_calls.get(key) {
+            let handler = listener.handler.deref();
+            handler(path)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
 }
 
 impl ServiceApi for Rpc {
@@ -208,6 +239,10 @@ impl RpcGate {
 
     pub fn call_raw(&self, key: &str, input_data: &str) -> String {
         return self.rpc.call_raw(key, input_data);
+    }
+
+    pub fn get_file(&self, key: &str, path: &str) -> Result<Vec<u8>, std::io::Error> {
+        return self.rpc.get_file(key, path)
     }
 
 }

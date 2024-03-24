@@ -8,6 +8,7 @@ use tokio::runtime;
 use tokio::sync::{mpsc};
 use bytes::Bytes;
 use warp::{Filter, reply, Rejection, Reply};
+use warp::path::Tail;
 use warp::ws::{Message, WebSocket};
 
 use amina_core::events::EventEmitterGate;
@@ -65,11 +66,17 @@ impl RpcServer {
 
         let prc_call_handler = warp::post()
             .and(warp::path!("api" / "rpc_call"))
-            .and(rpc_gate_filter)
+            .and(rpc_gate_filter.clone())
             .and(warp::query::<HashMap<String, String>>())
             .and(warp::body::bytes())
             .and_then(handle_rpc_call)
-            .with(cors);
+            .with(cors.clone());
+
+        let get_file_handler = warp::get()
+            .and(warp::path("get_file"))
+            .and(rpc_gate_filter.clone())
+            .and(warp::path::tail())
+            .and_then(handle_get_file);
 
         let users_copy = users.clone();
         let events_ws_handler = warp::path!("api" / "events")
@@ -90,7 +97,7 @@ impl RpcServer {
         let addr = SocketAddr::from(([127, 0, 0, 1], 8090));
 
         rt.spawn(async move {
-            warp::serve(prc_call_handler.or(events_ws_handler))
+            warp::serve(prc_call_handler.or(events_ws_handler).or(get_file_handler))
                 .run(addr)
                 .await;
         });
@@ -139,3 +146,23 @@ async fn handle_rpc_call(rpc_gate: Service<RpcGate>, p: HashMap<String, String>,
             warp::http::StatusCode::BAD_REQUEST)),
     }
 }
+
+async fn handle_get_file(rpc_gate: Service<RpcGate>, tail: Tail) -> Result<impl Reply, Rejection> {
+    let key_value: Vec<&str> = tail.as_str().splitn(2, "/").collect();
+    let key = key_value[0];
+    let path = key_value[1];
+    let file_bytes =  rpc_gate.get_file(key, path);
+    match file_bytes {
+        Ok(file_bytes) => {
+            let response = warp::http::Response::builder()
+                .body(file_bytes)
+                .unwrap();
+            Ok(reply::with_status(response, warp::http::StatusCode::OK))
+        },
+        Err(e) => {
+            log::error!("Error: {:?}", e);
+            Err(warp::reject::not_found())
+        }
+    }
+}
+
