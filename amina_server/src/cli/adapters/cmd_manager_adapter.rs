@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::iter::FromIterator;
+use amina_core::cmd_manager::{ArgDescription, ArgType, ArgsList, CmdManager};
+use amina_core::service::Service;
 
-use crate::cmd_manager::{ArgDescription, ArgsList, ArgType, CmdDescription, CmdManager};
+use crate::cli::InputHandler;
 
 #[derive(PartialEq)]
 enum ArgsParserState {
@@ -12,55 +14,45 @@ enum ArgsParserState {
     ReadingNonStringValue,
 }
 
-pub struct CmdManagerCliAdapter<'a> {
-    cmd_manager: &'a CmdManager,
+pub struct CmdManagerAdapter {
+    cmd_manager: Service<CmdManager>,
 }
 
-impl <'a> CmdManagerCliAdapter<'a> {
-
-    pub fn new(cmd_manager: &'a CmdManager) -> Self {
+impl CmdManagerAdapter {
+    pub fn new(cmd_manager: Service<CmdManager>) -> Self {
         Self {
             cmd_manager
         }
     }
+}
 
-    pub fn run(&self) {
-        self.cmd_manager.add_command(CmdDescription {
-                call_name: "q".to_string(),
-                description: Some("Exit the application".to_string()),
-                args: HashMap::new(),
+impl InputHandler for CmdManagerAdapter {
+    fn handle(&self, input_line: &str) {
+        let cmd_line = input_line.replace("\n", "");
+
+        let args_start_option = cmd_line.find(" ");
+        let (cmd_name, args_str) = match args_start_option {
+            Some(args_start) => {
+                (&cmd_line[..args_start], &cmd_line[(args_start + 1)..])
             },
-            |_| {}
-        );
+            None => {
+                (&cmd_line[..], "")
+            },
+        };
 
-        loop {
-            let mut cmd_line = String::new();
-            std::io::stdin().read_line(&mut cmd_line).unwrap();
+        log::debug!("CLI cmd: {:?}, args: {:?}", cmd_name, args_str);
 
-            let cmd_line = cmd_line.replace("\n", "");
-
-            let args_start_option = cmd_line.find(" ");
-            let (cmd_name, args_str) = match args_start_option {
-                Some(args_start) => {
-                    (&cmd_line[..args_start], &cmd_line[(args_start + 1)..])
-                },
-                None => {
-                    (&cmd_line[..], "")
-                },
-            };
-
-            log::debug!("CLI cmd: {:?}, args: {:?}", cmd_name, args_str);
-
-            let cmd_list = self.cmd_manager.get_cmd_description().read().unwrap();
-            let cmd_wrapper = cmd_list.get(cmd_name).unwrap();
-
-            let args = parse(args_str, &cmd_wrapper.description.args);
-            log::debug!("Cmd args: {:?}", &args);
-
-            if cmd_name.eq("q") {
-                break;
-            } else {
-                (cmd_wrapper.handler)(&args);
+        let cmd_list = self.cmd_manager.get_cmd_description().read().unwrap();
+        match cmd_list.get(cmd_name) {
+            Some(cmd_wrapper) => {
+                let args = parse(args_str, &cmd_wrapper.description.args);
+                if let Some(args) = args {
+                    log::debug!("Cmd args: {:?}", &args);
+                    (cmd_wrapper.handler)(&args);
+                }
+            },
+            None => {
+                log::error!("Unknown command '{}'", cmd_name);
             }
         }
     }
@@ -137,7 +129,7 @@ fn parse_raw(args_str: &str) -> HashMap<String, String> {
     return result;
 }
 
-fn parse(args_str: &str, args_description: &HashMap<String, ArgDescription>) -> ArgsList {
+fn parse(args_str: &str, args_description: &HashMap<String, ArgDescription>) -> Option<ArgsList> {
     let mut args_list = ArgsList::new();
 
     let raw_args = parse_raw(args_str);
@@ -147,8 +139,13 @@ fn parse(args_str: &str, args_description: &HashMap<String, ArgDescription>) -> 
             Some(arg_value_raw) => {
                 match description.arg_type {
                     ArgType::U64 => {
-                        let value: u64 = arg_value_raw.parse::<u64>().unwrap();
-                        args_list.put_u64(arg_name, value);
+                        match arg_value_raw.parse::<u64>() {
+                            Ok(value) => args_list.put_u64(arg_name, value),
+                            Err(_) => {
+                                log::error!("Invalid int arg '{}': '{}'", arg_name, arg_value_raw);
+                                return None;
+                            }
+                        }
                     },
                     ArgType::BOOL => {
                         if arg_value_raw.eq("y") {
@@ -156,7 +153,8 @@ fn parse(args_str: &str, args_description: &HashMap<String, ArgDescription>) -> 
                         } else if arg_value_raw.eq("n") {
                             args_list.put_bool(arg_name, false);
                         } else {
-                            unreachable!()
+                            log::error!("Invalid bool arg '{}', expected 'y' or 'n' but '{}' found", arg_name, arg_value_raw);
+                            return None;
                         }
                     },
                     ArgType::STRING => {
@@ -165,10 +163,11 @@ fn parse(args_str: &str, args_description: &HashMap<String, ArgDescription>) -> 
                 }
             },
             None => {
-                unreachable!()
+                log::error!("Argument '{}' not found", arg_name);
+                return None;
             }
         }
     }
 
-    return args_list;
+    return Some(args_list);
 }

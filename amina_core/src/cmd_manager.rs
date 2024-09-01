@@ -1,5 +1,3 @@
-pub mod cli_adapter;
-
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -132,8 +130,8 @@ impl ArgsList {
 }
 
 pub struct CmdWrapper {
-    description: CmdDescription,
-    handler: Box<dyn Fn(&ArgsList) + Sync + Send + 'static>,
+    pub description: CmdDescription,
+    pub handler: Box<dyn Fn(&ArgsList) + Sync + Send + 'static>,
 }
 
 #[derive(Serialize)]
