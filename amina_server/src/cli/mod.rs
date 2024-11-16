@@ -72,3 +72,42 @@ impl CliContext {
     }
 }
 
+pub struct SimpleCliContext {
+    input_handler: Box<dyn InputHandler>,
+}
+
+impl SimpleCliContext {
+    pub fn create(input_handler: Box<dyn InputHandler>, filters: Vec<(String, log::LevelFilter)>, _: &Path) -> Self {
+        let mut builder = Builder::from_default_env();
+
+        builder.format(|buf, record| {
+                write!(buf, "[{}][{}][{}] {}\n", Local::now().format("%Y-%m-%d %H:%M:%S"), record.level(), record.target(), record.args())
+        });
+        builder.filter(None, LevelFilter::Debug);
+
+        for (module, level) in filters {
+            builder.filter(Some(&module), level);
+        }
+
+        builder.init();
+
+        Self {
+            input_handler
+        }
+    }
+
+    pub fn run(&mut self) {
+        loop {
+            let mut cmd_line = String::new();
+            std::io::stdin().read_line(&mut cmd_line).unwrap();
+
+            let cmd_line = cmd_line.replace("\n", "");
+
+            if cmd_line == "q" {
+                break;
+            }
+
+            self.input_handler.handle(&cmd_line);
+        }
+    }
+}
