@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::SinkExt;
 use tokio::runtime;
-use tokio::sync::{mpsc};
+use tokio::sync::mpsc;
 use bytes::Bytes;
 use warp::{Filter, reply, Rejection, Reply};
 use warp::path::Tail;
@@ -20,6 +21,11 @@ struct WsUsers {
     users: RwLock<HashMap<usize, mpsc::UnboundedSender<Message>>>,
 }
 
+pub struct RpcServerConfig {
+    pub socket_address: SocketAddr,
+    pub static_files_path: Option<PathBuf>,
+}
+
 pub struct EventToUi {
     pub key: String,
     pub data: String,
@@ -30,7 +36,7 @@ pub struct RpcServer {
 }
 
 impl RpcServer {
-    pub fn run(context: &Context) -> Self {
+    pub fn run(context: &Context, config: &RpcServerConfig) -> Self {
         let users = Arc::new(WsUsers {
             next_id: AtomicUsize::new(1),
             users: RwLock::default(),
@@ -71,12 +77,14 @@ impl RpcServer {
             .and(warp::body::bytes())
             .and_then(handle_rpc_call)
             .with(cors.clone());
+        let handlers = prc_call_handler;
 
         let get_file_handler = warp::get()
             .and(warp::path("get_file"))
             .and(rpc_gate_filter.clone())
             .and(warp::path::tail())
             .and_then(handle_get_file);
+        let handlers = handlers.or(get_file_handler);
 
         let users_copy = users.clone();
         let events_ws_handler = warp::path!("api" / "events")
@@ -87,6 +95,7 @@ impl RpcServer {
                     Self::user_connected(socket, users_copy.clone())
                 )
             });
+        let handlers = handlers.or(events_ws_handler);
 
         let rt = runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -94,13 +103,22 @@ impl RpcServer {
             .build()
             .unwrap();
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], 8090));
+        let addr = config.socket_address.clone();
+        
+        log::debug!("static_files_path: {:?}", &config.static_files_path);
 
-        rt.spawn(async move {
-            warp::serve(prc_call_handler.or(events_ws_handler).or(get_file_handler))
-                .run(addr)
-                .await;
-        });
+        if let Some(static_files_path) = config.static_files_path.clone() {
+            let static_files_handler = warp::fs::dir(static_files_path).with(cors.clone());
+            let handlers = handlers.or(static_files_handler);
+
+            rt.spawn(async move {
+                warp::serve(handlers).run(addr).await;
+            });
+        } else {
+            rt.spawn(async move {
+                warp::serve(handlers).run(addr).await;
+            });
+        }
 
         RpcServer {
             _rt: rt,
