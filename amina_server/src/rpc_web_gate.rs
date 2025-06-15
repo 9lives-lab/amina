@@ -167,9 +167,16 @@ async fn handle_rpc_call(rpc_gate: Service<RpcGate>, p: HashMap<String, String>,
 
 async fn handle_get_file(rpc_gate: Service<RpcGate>, tail: Tail) -> Result<impl Reply, Rejection> {
     let key_value: Vec<&str> = tail.as_str().splitn(2, "/").collect();
+
     let key = key_value[0];
-    let path = key_value[1];
-    let file_bytes =  rpc_gate.get_file(key, path);
+    let path = match urlencoding::decode(key_value[1]) {
+        Ok(path) => path,
+        Err(_) => {
+            return Err(warp::reject::not_found());
+        }
+    };
+
+    let file_bytes =  rpc_gate.get_file(key, &path);
     match file_bytes {
         Ok(file_bytes) => {
             let response = warp::http::Response::builder()
