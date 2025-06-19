@@ -104,6 +104,8 @@ impl Context {
     }
 }
 
+pub type AppContext = Context;
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

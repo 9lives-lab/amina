@@ -83,13 +83,33 @@ impl EmptyData {
 
 }
 
+pub trait RpcResult<T: Serialize>: Sized {
+    fn to_rpc_format(self) -> std::result::Result<T, String>;
+}
+
+#[cfg(feature = "anyhow")]
+impl <T: Serialize> RpcResult<T> for anyhow::Result<T> {
+    fn to_rpc_format(self) -> std::result::Result<T, String> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+impl <T> RpcResult<T> for T where T: Serialize {
+    fn to_rpc_format(self) -> std::result::Result<T, String> {
+        Ok(self)
+    }
+}
+
+
 pub struct Rpc {
     calls: RwLock<HashMap<String, Listener>>,
     get_file_calls: RwLock<HashMap<String, GetFileListener>>,
 }
 
 impl Rpc {
-
     pub fn new() -> Self {
         Self {
             calls: RwLock::new(HashMap::new()),
@@ -97,10 +117,11 @@ impl Rpc {
         }
     }
 
-    pub fn on_generic_call_fn<I, O, F>(&self, key: &str, handler: F) where
+    pub fn on_generic_call_fn<I, O, R, F>(&self, key: &str, handler: F) where
             for<'de> I: Deserialize<'de>,
             O: Serialize,
-            F: Fn(&I) -> O + Send + Sync + 'static
+            R: RpcResult<O> + 'static,
+            F: Fn(&I) -> R + Send + Sync + 'static
     {
         let handler_wrapper = move |input_data: &str| {
             let input_value = serde_json::from_str(input_data);
@@ -108,7 +129,7 @@ impl Rpc {
                 log::error!("Invalid input req: {}", input_data);
             }
             let input_value: I = input_value.unwrap();
-            let output_value = handler(&input_value);
+            let output_value = handler(&input_value).to_rpc_format();
             let output_data = serde_json::to_string(&output_value).unwrap();
             return output_data;
         };

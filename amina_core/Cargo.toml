@@ -13,4 +13,8 @@ serde_json = "1.0.138"
 threadpool = "1.8.1"
 reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 thiserror = "2.0.11"
+anyhow = { version = "1.0.95", optional = true }
 amina_core_derive = { path = "../amina_core_derive" }
+
+[features]
+anyhow = ["dep:anyhow"]
