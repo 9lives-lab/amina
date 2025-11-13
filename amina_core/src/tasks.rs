@@ -17,7 +17,7 @@ impl TaskContext {
         }
     }
     
-    fn stop(&self) {
+    pub fn stop(&self) {
         self.is_interrupted.store(true, Ordering::Relaxed);
     }
 
@@ -59,7 +59,7 @@ impl TaskManager {
         });
     }
 
-    pub fn run<F>(&self, job: F) where
+    pub fn run<F>(&self, job: F) -> Arc<TaskContext> where
         F: FnOnce(Arc<TaskContext>) + Send + 'static
     {
         let task_context = Arc::new(TaskContext::new());
@@ -67,8 +67,12 @@ impl TaskManager {
         let mut tasks = self.tasks.write().unwrap();
         tasks.push(task_context.clone());
 
+        let task_context_copy = task_context.clone();
         thread::spawn(move || {
-            job(task_context);
+            job(task_context_copy);
         });
+
+        task_context
     }
 }
+
