@@ -1,0 +1,10 @@
+[package]
+name = "amina_tauri"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+
+[dependencies]
+serde = "1.0.217"
+tauri = { version = "2", features = [] }
+amina_core = { path = "../amina_core" }

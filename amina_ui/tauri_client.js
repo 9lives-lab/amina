@@ -1,21 +1,18 @@
-import axios from 'axios'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event';
 
-export class AminaClientAPI {
-  constructor(apiBaseAddr) {
-    this.rpcAddress = 'http://' + apiBaseAddr + '/'
-    this.eventsApiAddress = 'ws://' + apiBaseAddr + '/api/events'
-    
-    console.debug(this.rpcAddress);
-    console.debug(this.eventsApiAddress);
-
+export class AminaTauriClient {
+  constructor() {
     this.eventHandlers = {}
-    this.eventsApiConnection = new WebSocket(this.eventsApiAddress)
-    this.eventsApiConnection.onmessage = this.onMessage.bind(this)
+
+    listen('amina-event', (event) => {
+      this.onMessage(event)
+    })
   }
 
   onMessage(event) {
-    const message = JSON.parse(event.data)
-    const { key, data } = message
+    const key = event.payload.key
+    const data = JSON.parse(event.payload.data)
 
     if (key in this.eventHandlers) {
       const handlers = this.eventHandlers[key]
@@ -23,16 +20,6 @@ export class AminaClientAPI {
         const handler = handlers[owner]
         handler(data)
       }
-    }
-  }
-
-  async sendEvent (key, data) {
-    try {
-      const url = `${this.rpcAddress}api/send_event_from_ui?key=${key}`
-      await axios.post(url, data)
-    } catch (error) {
-      console.error(error)
-      throw error
     }
   }
 
@@ -50,27 +37,21 @@ export class AminaClientAPI {
   }
 
   async sendRequest (key, inputValue = { value: 0 }) {
-    try {
-      const url = `${this.rpcAddress}api/rpc_call?key=${key}`
-      const response = await axios.post(url, inputValue)
-      if (response.data === null) {
-        return;
-      }
+    const request = JSON.stringify(inputValue)
+    const res = await invoke("rpc_handler", { key: key, request: request })
 
-      if (typeof response.data === 'object') {
-        if ('Ok' in response.data) {
-          return response.data.Ok
-        } else if ('Err' in response.data) {
-          throw response.data.Err
-        } else {
-          return response.data
-        }
+    const response = JSON.parse(res)
+
+    if (typeof response === 'object') {
+      if ('Ok' in response) {
+        return response.Ok
+      } else if ('Err' in response.data) {
+        throw response.Err
       } else {
-        return response.data
+        return response
       }
-    } catch (error) {
-      console.error(error)
-      throw error
+    } else {
+      return response
     }
   }
 
